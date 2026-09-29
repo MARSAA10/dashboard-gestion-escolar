@@ -24,12 +24,77 @@
 <section class="bottom" id="reportes"><div class="panel"><div class="panelhead"><div><h2>Matrícula por grado</h2><div class="sub">Cantidad de estudiantes registrados</div></div><span class="sub">Total: <b id="chartTotal">840</b></span></div><div id="gradeBars"></div></div><div class="panel"><div class="panelhead"><div><h2>Rendimiento por área</h2><div class="sub">Promedio de calificaciones</div></div><span class="sub">Escala / 20</span></div><div id="subjects"></div><div class="footnote">Los gráficos se actualizan al cambiar los filtros.</div></div></section>
 </main></div>
 <script>
-const records=[];const grades=['1.°','2.°','3.°','4.°','5.°','6.°'];const sections=['A','B','C'];
-// Datos sintéticos de demostración: 2 niveles, 6 grados y 3 secciones.
-for(let n=0;n<2;n++)for(let g=0;g<6;g++)for(let s=0;s<2;s++){const count= n===0? [28,30,29,31,27,28][g]+(s?1:0):[32,30,31,29,28,27][g]+(s?2:0);records.push({nivel:n===0?'Primaria':'Secundaria',grado:grades[g],seccion:sections[s],count,avg:14.4+g*.22+n*.7+s*.3,achievement:65+g*1.4+n*4+s*2})}
-const $=id=>document.getElementById(id);const colors=['#3563e9','#16a394','#f3b33d','#8060c9','#e45b66','#4b9ad7'];
-function update(){const n=$('nivel').value,g=$('grado').value,s=$('seccion').value;const data=records.filter(r=>(n==='Todos'||r.nivel===n)&&(g==='Todos'||r.grado===g)&&(s==='Todas'||r.seccion===s));const total=data.reduce((a,r)=>a+r.count,0);const avg=data.length?data.reduce((a,r)=>a+r.avg*r.count,0)/total:0;const ach=data.length?data.reduce((a,r)=>a+r.achievement*r.count,0)/total:0;$('total').textContent=total.toLocaleString('es-PE');$('sections').textContent=data.length;$('average').innerHTML=avg.toFixed(1)+' <small style="font-size:13px;color:#8b95a8">/ 20</small>';$('achievement').textContent=Math.round(ach)+'%';$('chartTotal').textContent=total.toLocaleString('es-PE');
-const byGrade=grades.map(x=>({name:x,value:data.filter(r=>r.grado===x).reduce((a,r)=>a+r.count,0)}));$('gradeBars').innerHTML=byGrade.map((x,i)=>'<div class="subject"><div class="subjectname">'+x.name+' grado</div><div class="barbg"><div class="bar" style="width:'+(x.value?x.value/Math.max(1,...byGrade.map(v=>v.value))*100:0)+'%;background:'+colors[i]+'"></div></div><div class="score">'+x.value+'</div></div>').join('');
-const names=['Matemática','Comunicación','Ciencia y Tecnología','Personal Social','Arte y Cultura'];$('subjects').innerHTML=names.map((name,i)=>{const val=Math.max(0,Math.min(20,avg+[-.8,.4,.1,.7,.9][i]));return '<div class="subject"><div class="subjectname">'+name+'</div><div class="barbg"><div class="bar" style="width:'+(val*5)+'%;background:'+colors[i]+'"></div></div><div class="score">'+val.toFixed(1)+'</div></div>'}).join('')}
-['nivel','grado','seccion'].forEach(id=>$(id).addEventListener('change',update));function exportCSV(){const rows=[['Nivel','Grado','Sección','Estudiantes','Promedio','Logro esperado o destacado'],...records.map(r=>[r.nivel,r.grado,r.seccion,r.count,r.avg.toFixed(1),r.achievement+'%'])];const csv='\ufeff'+rows.map(r=>r.join(';')).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));a.download='reporte_gestion_escolar_2026.csv';a.click();URL.revokeObjectURL(a.href)}update();
+const $=id=>document.getElementById(id);
+const colors=['#3563e9','#16a394','#f3b33d','#8060c9','#e45b66','#4b9ad7'];
+let students=[], performance=[], institution={};
+const grades=['1.°','2.°','3.°','4.°','5.°','6.°'];
+
+async function loadCSV(url){
+  const r=await fetch(url,{cache:'no-store'});
+  if(!r.ok) throw new Error('No se pudo cargar '+url);
+  const text=await r.text();
+  const lines=text.replace(/^\uFEFF/,'').trim().split(/\r?\n/);
+  if(lines.length<2) return [];
+  const headers=lines[0].split(';').map(x=>x.trim());
+  return lines.slice(1).filter(Boolean).map(line=>{
+    const values=line.split(';'); const o={};
+    headers.forEach((h,i)=>o[h]=(values[i]??'').trim()); return o;
+  });
+}
+async function loadJSON(url){
+  const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error('No se pudo cargar '+url); return r.json();
+}
+function number(v){const n=parseFloat(String(v).replace(',','.')); return Number.isFinite(n)?n:0;}
+function update(){
+  const n=$('nivel').value,g=$('grado').value,s=$('seccion').value;
+  const data=students.filter(r=>(n==='Todos'||r.Nivel===n)&&(g==='Todos'||r.Grado===g)&&(s==='Todas'||r.Seccion===s));
+  const codes=new Set(data.map(r=>r.Codigo).filter(Boolean));
+  const perf=performance.filter(r=>codes.has(r.Codigo));
+  const scores=perf.flatMap(r=>['Bimestre I','Bimestre II','Bimestre III','Bimestre IV'].map(k=>number(r[k])).filter(v=>v>0));
+  const total=data.length;
+  const avg=scores.length?scores.reduce((a,b)=>a+b,0)/scores.length:0;
+  const sections=new Set(data.map(r=>r.Nivel+'|'+r.Grado+'|'+r.Seccion)).size;
+  const achieved=scores.length?scores.filter(v=>v>=14).length/scores.length*100:0;
+  $('total').textContent=total.toLocaleString('es-PE');
+  $('sections').textContent=sections;
+  $('average').innerHTML=avg.toFixed(1)+' <small style="font-size:13px;color:#8b95a8">/ 20</small>';
+  $('achievement').textContent=Math.round(achieved)+'%';
+  $('chartTotal').textContent=total.toLocaleString('es-PE');
+  const byGrade=grades.map(x=>({name:x,value:data.filter(r=>r.Grado===x).length}));
+  const max=Math.max(1,...byGrade.map(v=>v.value));
+  $('gradeBars').innerHTML=byGrade.map((x,i)=>'<div class="subject"><div class="subjectname">'+x.name+' grado</div><div class="barbg"><div class="bar" style="width:'+(x.value/max*100)+'%;background:'+colors[i]+'"></div></div><div class="score">'+x.value+'</div></div>').join('');
+  const names=['Matemática','Comunicación','Ciencia y Tecnología','Personal Social','Arte y Cultura'];
+  $('subjects').innerHTML=names.map((name,i)=>{
+    const rows=perf.filter(r=>r.Area===name);
+    const vals=rows.flatMap(r=>['Bimestre I','Bimestre II','Bimestre III','Bimestre IV'].map(k=>number(r[k])).filter(v=>v>0));
+    const val=vals.length?vals.reduce((a,b)=>a+b,0)/vals.length:0;
+    return '<div class="subject"><div class="subjectname">'+name+'</div><div class="barbg"><div class="bar" style="width:'+(Math.min(20,val)*5)+'%;background:'+colors[i]+'"></div></div><div class="score">'+val.toFixed(1)+'</div></div>';
+  }).join('');
+}
+function exportCSV(){
+  const rows=[['Codigo','Apellidos','Nombres','Nivel','Grado','Seccion','Sexo','Estado'],...students.map(r=>[r.Codigo,r.Apellidos,r.Nombres,r.Nivel,r.Grado,r.Seccion,r.Sexo,r.Estado])];
+  const csv='\ufeff'+rows.map(r=>r.join(';')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'})); a.download='reporte_estudiantes_2026.csv'; a.click(); URL.revokeObjectURL(a.href);
+}
+async function init(){
+  try{
+    [students,performance,institution]=await Promise.all([
+      loadCSV('data/estudiantes.csv'),
+      loadCSV('data/rendimiento.csv'),
+      loadJSON('data/institucion.json')
+    ]);
+    document.querySelector('.sidefoot strong').textContent=institution.nombre||'Institución Educativa';
+    document.querySelector('.sidefoot').innerHTML='<strong>'+(institution.nombre||'Institución Educativa')+'</strong>Panel de gestión académica<br>Periodo lectivo '+(institution.anio||'2026');
+    document.querySelector('.eyebrow').textContent=(institution.nombre||'Institución Educativa')+' / Panel de control';
+    document.querySelector('.avatar').textContent=(institution.sigla||'IE');
+    document.querySelector('.year').innerHTML='<option>Periodo '+(institution.anio||'2026')+'</option>';
+    update();
+  }catch(e){
+    console.error(e);
+    $('total').textContent='—'; $('average').innerHTML='— <small style="font-size:13px;color:#8b95a8">/ 20</small>'; $('achievement').textContent='—';
+    const note=document.querySelector('.footnote'); if(note) note.textContent='No se pudieron cargar los archivos de datos. Revisa data/estudiantes.csv, data/rendimiento.csv y data/institucion.json.';
+  }
+}
+['nivel','grado','seccion'].forEach(id=>$(id).addEventListener('change',update));
+init();
 </script></body></html>
